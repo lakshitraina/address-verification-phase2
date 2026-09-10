@@ -54,22 +54,46 @@ const { makeSeed } = require('./data');
 app.use(perStudentStore(makeSeed));
 app.use(express.static(path.join(__dirname, "public")));
 
-const PINCODE_REGEX = /^[1-9][0-9]{0,5}/;
+const VALID_STATES = [
+  "Karnataka",
+  "Maharashtra",
+  "Delhi",
+  "Tamil Nadu",
+  "Telangana",
+  "Uttar Pradesh",
+  "West Bengal",
+  "Gujarat",
+];
+
+const PINCODE_REGEX = /^[1-9][0-9]{5}$/;
+
+function sanitizeAddress(addr) {
+  if (!addr || typeof addr !== 'object') return {};
+  return {
+    line1: typeof addr.line1 === 'string' ? addr.line1.trim() : (addr.line1 != null ? String(addr.line1).trim() : ''),
+    city: typeof addr.city === 'string' ? addr.city.trim() : (addr.city != null ? String(addr.city).trim() : ''),
+    state: typeof addr.state === 'string' ? addr.state.trim() : (addr.state != null ? String(addr.state).trim() : ''),
+    pincode: typeof addr.pincode === 'string' ? addr.pincode.trim() : (addr.pincode != null ? String(addr.pincode).trim() : ''),
+  };
+}
 
 function computeMatchPercent(current, permanent) {
   const fields = ["line1", "city", "state", "pincode"];
   let matches = 0;
   for (const f of fields) {
-    if (current[f] === permanent[f]) matches++;
+    const curVal = String(current[f] || '').trim().toLowerCase();
+    const permVal = String(permanent[f] || '').trim().toLowerCase();
+    if (curVal && curVal === permVal) matches++;
   }
-  return Math.round((matches / 3) * 100);
+  return Math.round((matches / 4) * 100);
 }
 
 function validateAddress(addr) {
-  if (!addr) return "Address is required";
-  if (!addr.line1 || !addr.line1.trim()) return "line1 is required";
-  if (!addr.state || !addr.state.trim()) return "state is required";
-  if (!addr.pincode || !PINCODE_REGEX.test(addr.pincode)) return "Invalid pincode";
+  if (!addr || typeof addr !== 'object') return "Address is required";
+  if (!addr.line1 || typeof addr.line1 !== 'string' || !addr.line1.trim()) return "line1 is required";
+  if (!addr.city || typeof addr.city !== 'string' || !addr.city.trim()) return "city is required";
+  if (!addr.state || typeof addr.state !== 'string' || !addr.state.trim() || !VALID_STATES.includes(addr.state.trim())) return "Invalid state";
+  if (!addr.pincode || typeof addr.pincode !== 'string' || !PINCODE_REGEX.test(addr.pincode.trim())) return "Invalid pincode";
   return null;
 }
 
@@ -90,24 +114,25 @@ app.get("/api/address/:candidateId", (req, res) => {
 app.post("/api/address", (req, res) => {
   const body = req.body || {};
   const candidateId = body.candidateId || 0;
-  const current = body.current || {};
-  let sameAsPermanent = body.sameAsPermanent;
+  const sameAsPermanent = body.sameAsPermanent === true;
 
-  if (sameAsPermanent === undefined) {
-    sameAsPermanent = true;
-  }
-
-  let permanent = body.permanent || {};
-
-  const currentError = validateAddress(current);
+  const currentRaw = body.current;
+  const currentError = validateAddress(currentRaw);
   if (currentError) {
     return res.status(400).json({ error: currentError });
   }
-  if (!sameAsPermanent) {
-    const permanentError = validateAddress(permanent);
+  const current = sanitizeAddress(currentRaw);
+
+  let permanent;
+  if (sameAsPermanent) {
+    permanent = { ...current };
+  } else {
+    const permanentRaw = body.permanent;
+    const permanentError = validateAddress(permanentRaw);
     if (permanentError) {
       return res.status(400).json({ error: permanentError });
     }
+    permanent = sanitizeAddress(permanentRaw);
   }
 
   const record = {
@@ -121,7 +146,7 @@ app.post("/api/address", (req, res) => {
   };
   req.store.submissions.push(record);
 
-  res.status(200).json(record);
+  res.status(201).json(record);
 });
 
 // --- Interviewer/candidate tooling: reset seed data & serve README as a spec

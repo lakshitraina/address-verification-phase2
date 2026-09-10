@@ -9,8 +9,10 @@ const STATES = [
   "Gujarat",
 ];
 
+const PINCODE_REGEX = /^[1-9][0-9]{5}$/;
+
 function populateStateDropdown(select) {
-  select.innerHTML = STATES.map((s) => `<option value="${s}">${s}</option>`).join("");
+  select.innerHTML = '<option value="">Select State</option>' + STATES.map((s) => `<option value="${s}">${s}</option>`).join("");
 }
 
 function showToast(message, type) {
@@ -22,6 +24,19 @@ function showToast(message, type) {
 
 const sameAsPermanentCheckbox = document.getElementById("same-as-permanent");
 const permanentFieldset = document.getElementById("permanent-fieldset");
+const currentPincodeInput = document.getElementById("current-pincode");
+const currentPincodeError = document.getElementById("current-pincode-error");
+
+if (currentPincodeInput) {
+  currentPincodeInput.addEventListener("input", () => {
+    const val = currentPincodeInput.value.trim();
+    if (val && !PINCODE_REGEX.test(val)) {
+      if (currentPincodeError) currentPincodeError.textContent = "Pincode must be exactly 6 digits (cannot start with 0)";
+    } else {
+      if (currentPincodeError) currentPincodeError.textContent = "";
+    }
+  });
+}
 
 sameAsPermanentCheckbox.addEventListener("change", () => {
   const checked = sameAsPermanentCheckbox.checked;
@@ -49,10 +64,10 @@ function renderSubmissions(list) {
       return `
         <tr>
           <td>${s.candidateId}</td>
-          <td>${cur.line1 ?? ""}, ${escapeHtml(cur.city ?? "")}, ${escapeHtml(cur.state ?? "")} - ${escapeHtml(cur.pincode ?? "")}</td>
-          <td>${perm.line1 ?? ""}, ${escapeHtml(perm.city ?? "")}, ${escapeHtml(perm.state ?? "")} - ${escapeHtml(perm.pincode ?? "")}</td>
+          <td>${escapeHtml(cur.line1 ?? "")}, ${escapeHtml(cur.city ?? "")}, ${escapeHtml(cur.state ?? "")} - ${escapeHtml(cur.pincode ?? "")}</td>
+          <td>${escapeHtml(perm.line1 ?? "")}, ${escapeHtml(perm.city ?? "")}, ${escapeHtml(perm.state ?? "")} - ${escapeHtml(perm.pincode ?? "")}</td>
           <td>${s.sameAsPermanent ? "Yes" : "No"}</td>
-          <td>${s.matchPercent}</td>
+          <td>${s.matchPercent}%</td>
           <td>${s.createdAt}</td>
         </tr>`;
     })
@@ -84,15 +99,30 @@ document.getElementById("address-form").addEventListener("submit", async (e) => 
     pincode: document.getElementById("permanent-pincode").value,
   };
 
-  const res = await fetch("/api/address", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ candidateId, current, permanent, sameAsPermanent }),
-  });
+  if (!PINCODE_REGEX.test(current.pincode.trim())) {
+    if (currentPincodeError) currentPincodeError.textContent = "Pincode must be exactly 6 digits (cannot start with 0)";
+    showToast("Invalid pincode", "error");
+    return;
+  }
 
-  showToast("Address submitted successfully", "success");
+  try {
+    const res = await fetch("/api/address", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ candidateId, current, permanent, sameAsPermanent }),
+    });
 
-  loadSubmissions();
+    if (res.status === 201) {
+      showToast("Address submitted successfully", "success");
+      if (currentPincodeError) currentPincodeError.textContent = "";
+      loadSubmissions();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      showToast(data.error || "Submission failed", "error");
+    }
+  } catch (err) {
+    showToast("Network error: failed to submit address", "error");
+  }
 });
 
 // --- Interviewer/candidate tooling: reset seed data (not part of the app-under-test) ---
